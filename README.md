@@ -6,6 +6,11 @@ Collection of programs, tools, and scripts from the Schroderlab
 - [Tool A](https://github.com/yourusername/tool-a): Description and usage.
 - [Tool B](https://github.com/yourusername/tool-b): Description and usage.
 
+### Model-map FSC
+- [`pdb2mrc`](https://github.com/gschroe/schroderlab-collection/tree/main/model_map_fsc/pdb2mrc): Simulate cryo-EM map from pdb coordinates.
+- [`sl_fsc`](https://github.com/gschroe/schroderlab-collection/tree/main/model_map_fsc/fsc): Calculate the FSC of two 3D maps in mrc format.
+- 
+
 ## Simulation
 
 - [Tool C](https://github.com/yourusername/tool-c): Description and usage.
