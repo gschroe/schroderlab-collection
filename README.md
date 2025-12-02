@@ -1,0 +1,126 @@
+A collection of programs and scripts used for cryo-EM analysis of amyloid fibrils.
+These tools support micrograph analysis, 2D/3D processing, polymorph clustering, model–map comparison, and initial volume generation.
+
+## Contents
+
+- Micrograph and Image Analysis
+    
+- 2D Class Average Tools
+    
+- Initial Volume Generation
+    
+- Fibril Tracing and Crossing Removal
+    
+- Clustering Tools
+    
+- Model–Map FSC
+    
+- External Tools
+    
+---
+
+## **Sort Micrographs by Cross-β Signal**
+
+`sort_micrographs_crossbeta/`  
+Amyloid fibrils show a characteristic **4.7 Å cross-β reflection** in the Fourier spectrum.  
+This tool computes the signal strength in each micrograph and sorts micrographs according to the visibility of fibrils.  
+This helps to identify micrographs with high fibril content before particle extraction.
+
+---
+
+## **Crossover Length Determination**
+
+`crossover_from_particle_locations/`  
+Computes the **crossover distance** of amyloid fibrils from 2D class averages.  
+The tool identifies the periodic modulation of fibrils and extracts the crossover spacing used to estimate the helical twist.
+
+---
+
+## **Orient 2D Class Averages into the Same Polarity**
+
+`polarity/`  
+Aligns all selected 2D class averages so that they point in the **same axial direction**.  
+This step is useful before initial model generation as it reduced the search space for stitching the class averages.
+
+---
+
+## Initial Volume Generation
+
+### **Initial Volume by Stitching 2D Class Averages**
+
+`initial_volume_stitching/`  
+Generates an initial 3D model by **placing 2D class averages sequentially along the fibril axis** and reconstructing a volume from these aligned images.  Useful when no reference is available.
+
+### **Initial Volume from Distance-Matrix Ordering** 
+
+`initial_volume_distance_matrix/`  
+Computes a pairwise distance matrix between 2D class averages, orders them along the fibril trajectory, and constructs an initial volume using this ordering.  This is an alternative to stitching and can work better when the dataset contains many short or noisy class averages.
+
+---
+
+## **Remove Fibril Crossings** (Janus)
+
+`remove_crossings/`  
+Removes image segments that contain **crossings or overlaps** between neighboring fibrils.  
+This is especially important when extracting long fibrils, where crossing regions can mislead helical reconstruction.
+
+---
+
+## Micrograph Polymorph Assignment Viewer
+
+`class_assignment_gui/`  
+A simple GUI to inspect where segments from **specific polymorphs** appear on individual micrographs.  Supports visual checks after clustering (ASHP/CHEP) to ensure correct polymorph assignment.
+
+---
+
+### **Compare Untwisted with Twisted 2D Class Averages** (Janus)
+
+`compare_twisted_untwisted/`  
+Compares the appearance of **untwisted fibril classes** against **twisted fibril classes** to identify whether a straight fibril variant corresponds to a known twisted polymorph.  
+Useful when datasets contain both twisted and untwisted forms of the same amyloid.
+
+---
+
+## Clustering Tools
+
+These tools are hosted in separate repositories:
+
+- **CHEP** – Clustering based on 2D class assignments  
+    https://github.com/gschroe/chep
+    
+- **ASHP** – Clustering based on comparing 2D class averages, includes CHEP  
+    https://github.com/JanusLammert/ASHP 
+
+---
+## Density Sharpening
+ 
+**VISDEM** – Density sharpening with optional helical symmetry  
+    https://github.com/gschroe/visdem
+
+
+---
+## Model–Map FSC
+
+`model_map_fsc/`
+
+- [`sl_pdb2mrc.c`](https://github.com/gschroe/schroderlab-collection/tree/main/model_map_fsc/pdb2mrc): Simulate cryo-EM map from pdb coordinates.
+- [`sl_fsc.c`](https://github.com/gschroe/schroderlab-collection/tree/main/model_map_fsc/fsc): Calculate the FSC of two 3D maps in mrc format.
+
+(plot fsc curves via [`plot_fsc_data.py`](https://github.com/gschroe/schroderlab-collection/blob/main/model_map_fsc/plot_fsc_data.py))
+    Plots FSC curves produced by the above tools.
+    
+
+These programs allow quantitative model–map agreement evaluation, independent of any cryo-EM software package.
+
+
+---
+
+## External Tools
+
+Links to additional software developed in the group or used in this workflow:
+
+- **CHEP** – Clustering based on 2D class assignments
+    
+- **ASHP** – Image-based clustering of 2D class averages
+    
+- **VISDEM** – Density sharpening tool with helical symmetry support
