@@ -40,7 +40,7 @@ Generates an initial 3D model by **placing 2D class averages sequentially along 
 ### **Initial Volume from Distance-Matrix Ordering** 
 
 `initial_volume_distance_matrix/`  
-Computes a pairwise distance matrix between 2D class averages, orders them along the fibril trajectory, and constructs an initial volume using this ordering.  This is an alternative to stitching and can work better when the dataset contains many short or noisy class averages.
+Computes a pairwise distance matrix between 2D class averages, orders them along the fibril trajectory, and constructs an initial volume using this ordering.  This is an alternative to stitching images by optimizing image overlap.
 
 ---
 
@@ -55,7 +55,7 @@ This is especially important when extracting long fibrils, where crossing region
 ## Micrograph Polymorph Assignment Viewer
 
 `class_assignment_gui/`  
-A simple GUI to inspect where segments from **specific polymorphs** appear on individual micrographs.  Supports visual checks after clustering (ASHP/CHEP) to ensure correct polymorph assignment.
+A GUI to inspect where segments from **specific polymorphs** appear on individual micrographs.  Supports visual checks after clustering (ASHP/CHEP) to ensure correct polymorph assignment.
 
 ---
 
@@ -63,7 +63,6 @@ A simple GUI to inspect where segments from **specific polymorphs** appear on in
 
 `compare_twisted_untwisted/`  
 Compares the appearance of **untwisted fibril classes** against **twisted fibril classes** to identify whether a straight fibril variant corresponds to a known twisted polymorph.  
-Useful when datasets contain both twisted and untwisted forms of the same amyloid.
 
 ---
 
