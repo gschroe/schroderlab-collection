@@ -1,5 +1,5 @@
 /*
- * visdem_density.c
+ * sl_pdb2mrc_bf.c
  *
  * This program reads in PDB coordinates (ATOM and HETATM entries),
  * renders a density map using the Peng kernel (adapted from your render.c code :contentReference[oaicite:0]{index=0}&#8203;:contentReference[oaicite:1]{index=1})
@@ -22,10 +22,10 @@
  * so the constant k provides an empirical conversion (k = 8.0 by default). Adjust k as needed.
  *
  * Compile with:
- *    gcc -O2 -o visdem_density visdem_density.c -lm -lfftw3f
+ *    gcc -O2 -o sl_pdb2mrc_bf sl_pdb2mrc_bf.c -lm -lfftw3f
  *
- * Author: [Your Name]
- * Date: [Date]
+ * Author: Gunnar F Schroeder
+ * Date: 10.08.2025
  */
 
 #include <stdio.h>
