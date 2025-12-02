@@ -44,7 +44,7 @@ Computes a pairwise distance matrix between 2D class averages, orders them along
 
 ---
 
-## **Remove Fibril Crossings** (Janus)
+## **Remove Fibril Crossings** 
 
 `remove_crossings/`  
 Removes image segments that contain **crossings or overlaps** between neighboring fibrils.  
@@ -59,7 +59,7 @@ A simple GUI to inspect where segments from **specific polymorphs** appear on in
 
 ---
 
-### **Compare Untwisted with Twisted 2D Class Averages** (Janus)
+### **Compare Untwisted with Twisted 2D Class Averages** 
 
 `compare_twisted_untwisted/`  
 Compares the appearance of **untwisted fibril classes** against **twisted fibril classes** to identify whether a straight fibril variant corresponds to a known twisted polymorph.  
