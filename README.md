@@ -1,22 +1,8 @@
+# Tools Collection
+
 A collection of programs and scripts used for cryo-EM analysis of amyloid fibrils.
-These tools support micrograph analysis, 2D/3D processing, polymorph clustering, model–map comparison, and initial volume generation.
+These tools support micrograph analysis, 2D/3D processing, polymorph clustering, model–map comparison, and initial volume generation.    
 
-## Contents
-
-- Micrograph and Image Analysis
-    
-- 2D Class Average Tools
-    
-- Initial Volume Generation
-    
-- Fibril Tracing and Crossing Removal
-    
-- Clustering Tools
-    
-- Model–Map FSC
-    
-- External Tools
-    
 ---
 
 ## **Sort Micrographs by Cross-β Signal**
@@ -113,14 +99,4 @@ These tools are hosted in separate repositories:
 These programs allow quantitative model–map agreement evaluation, independent of any cryo-EM software package.
 
 
----
 
-## External Tools
-
-Links to additional software developed in the group or used in this workflow:
-
-- **CHEP** – Clustering based on 2D class assignments
-    
-- **ASHP** – Image-based clustering of 2D class averages
-    
-- **VISDEM** – Density sharpening tool with helical symmetry support
