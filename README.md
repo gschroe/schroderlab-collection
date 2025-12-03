@@ -13,7 +13,7 @@ These tools support micrograph analysis, 2D/3D processing, polymorph clustering,
 - [Remove Fibril Crossings](#remove-fibril-crossings)
 - [Compare Untwisted with Twisted 2D Class Averages](#compare-untwisted-with-twisted-2d-class-averages)
 - [Micrograph Polymorph Assignment Viewer](#micrograph-polymorph-assignment-viewer)
-- [Clustering Tools](#clustering-tools)
+- [Polymorph Separation Tools](#polymorph-separation-tools)
 - [Density Sharpening](#density-sharpening)
 - [Model-Map FSC](#model-map-fsc)
 
@@ -80,7 +80,7 @@ Compares the appearance of **untwisted fibril classes** against **twisted fibril
 
 ---
 
-## Clustering Tools
+## Polymorph Separation Tools
 
 These tools are hosted in separate repositories:
 
@@ -98,7 +98,7 @@ These tools are hosted in separate repositories:
 
 
 ---
-## Model–Map FSC
+## Model-Map FSC
 
 `model_map_fsc/`
 
