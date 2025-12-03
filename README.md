@@ -3,6 +3,20 @@
 A collection of programs and scripts used for cryo-EM analysis of amyloid fibrils.
 These tools support micrograph analysis, 2D/3D processing, polymorph clustering, model–map comparison, and initial volume generation.    
 
+## Content
+- [Sort Micrographs by Cross-β Signal](#sort-micrographs-by-cross-β-signal)
+- [Crossover Length Determination](#crossover-length-determination)
+- [Orient 2D Class Averages into the Same Polarity](#orient-2d-class-averages-into-the-same-polarity)
+- [Initial Volume Generation](#initial-volume-generation)
+  - Initial Volume from Distance-Matrix Ordering
+  - Initial Volume by Stitching 2D Class Averages
+- [Remove Fibril Crossings](#remove-fibril-crossings)
+- [Compare Untwisted with Twisted 2D Class Averages](#compare-untwisted-with-twisted-2d-class-averages)
+- [Micrograph Polymorph Assignment Viewer](#micrograph-polymorph-assignment-viewer)
+- [Clustering Tools](#clustering-tools)
+- [Density Sharpening](#density-sharpening)
+- [Model-Map FSC](#model-map-fsc)
+
 ---
 
 ## **Sort Micrographs by Cross-β Signal**
