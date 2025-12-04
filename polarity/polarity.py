@@ -3,7 +3,7 @@
 """
 Script to read in a particle STAR file and corresponding class averages (.mrcs),
 compute class polarity, flip classes for consistent orientation,
-and write out a new .mrcs file.
+and write out a new .mrcs file..
 
 Usage:
   python polarity.py -i particles.star -c class_averages.mrcs -o output_flipped.mrcs
