@@ -1,0 +1,10 @@
+name: CTU                     # ← name of the environment
+channels:
+  - conda-forge               # preferred channel
+  - defaults                  # keep defaults as a fallback (optional)
+
+dependencies:
+  - python=3.11               # choose a recent Python version (adjust if needed)
+  - mrcfile                   # reads/writes .mrc/.mrcs files
+  - numpy                     # array handling
+  - scipy                     # provides correlate2d, pearsonr, etc.
