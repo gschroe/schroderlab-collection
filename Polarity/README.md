@@ -1,6 +1,4 @@
-#Consistent Polarity for 2D Helical Class Averages
-
-
+# Consistent Polarity for 2D Helical Class Averages
 
 `sl_polarity.py` reads a **particle STAR file** and the corresponding **2D class averages** (`.mrcs`), estimates the **relative polarity** of 2D classes using filament information and Euler angles, and flips class-average images left–right so that all classes point in a **consistent direction**.
 
