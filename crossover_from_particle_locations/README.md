@@ -45,7 +45,7 @@ The script generates:
 
 ![Example crossover distance histogram](example_2dclass_data/Intra_class_distance_histogram_ths20.svg)
 
-The plot shows detected peaks at multiples of the crossover distance, marked with red dashed lines and labeled with their distance values. For the example 2D classes of an Aβ42 Type2 polymorph, which has and addmittly obvious crossover distance the first peak correspondes to the distance measured manually in one class average.
+The plot shows detected peaks at multiples of the crossover distance, marked with red dashed lines and labeled with their distance values. For the example 2D classes of an Aβ42 Type2 polymorph, which has and addmittly obvious crossover distance, the first peak correspondes to the distance measured manually in one class average.
 
 ![Example Ab42 2D class average|200](example_2dclass_data/example_class_average_manual_co.svg)
 
