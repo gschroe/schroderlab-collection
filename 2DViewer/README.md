@@ -1,6 +1,6 @@
 ## 2D Class Selection and Filtering Workflow
 
-This repository contains two tools:
+This folder contains two tools:
 
 1. **`sl_display.py`** — an interactive viewer for inspecting and selecting 2D class averages (`.mrcs`).
     
