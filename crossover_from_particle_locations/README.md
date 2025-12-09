@@ -9,7 +9,7 @@ This script analyzes particle coordinates from helical filaments to estimate cro
 ## Usage
 
 ```bash
-python ./crossover_from_coords.py example_2dclass_data/particles.star 0.82
+python ./sl_crossover_from_coords.py example_2dclass_data/particles.star 0.82
 ```
 
 ### Required Arguments

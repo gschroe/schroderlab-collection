@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description='Estimate crossover distances from particle coordinates in a STAR file. '
-                    'Example usage: python ./crossover_from_coords.py example_2dclass_data/particles.star 0.82'
+                    'Example usage: python ./sl_crossover_from_coords.py example_2dclass_data/particles.star 0.82'
     )
     parser.add_argument(
         'particle_star',
