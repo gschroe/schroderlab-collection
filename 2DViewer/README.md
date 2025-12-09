@@ -1,5 +1,4 @@
-##2D Class Selection and Filtering Workflow
-
+## 2D Class Selection and Filtering Workflow
 
 This repository contains two tools:
 
@@ -12,7 +11,7 @@ The tools allow rapid identification of good 2D classes and creation of a cleane
 
 ---
 
-## 1. Inspecting and Selecting 2D Classes (`dxdisplay.py`)
+### 1. Inspecting and Selecting 2D Classes (`sl_display.py`)
 
 ### Launch the viewer
 
