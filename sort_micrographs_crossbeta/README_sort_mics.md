@@ -128,7 +128,7 @@ Where:
 - E(k): Envelope function
 - N(k): Noise
 
-The tool calculates the azimuthally averaged CTF² at the cross-beta frequency and corrects the score:
+The tool calculates the radially (and azimuthally) averaged CTF² at the cross-beta frequency and corrects the score:
 
 ```
 corrected_score = raw_score / CTF²
