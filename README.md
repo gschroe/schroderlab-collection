@@ -130,8 +130,11 @@ These programs allow quantitative model–map agreement evaluation, independent 
 # License
 
 schroderlab-collection: Toolcollection for the processing of Cryo-EM Datasets
+
 Copyright (C) 2025  Gunnar Schröder
+
 Copyright (C) 2025  Simon Sommerhage
+
 Copyright (C) 2025  Janus Lammert
 
     This program is free software: you can redistribute it and/or modify
