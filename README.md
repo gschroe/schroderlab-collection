@@ -19,6 +19,21 @@ These tools support micrograph analysis, 2D/3D processing, polymorph clustering,
 
 ---
 
+## Napari-based Tool for Manual Fibril Annotation
+This tool is hosted in a separate repository:
+
+https://github.com/sim-som/cryoem_fibril_annotator
+
+### Features
+- **Interactive Display**: Real-time visualization of cryo-EM micrographs with napari
+- **Power Spectrum Support**: Synchronized display of micrographs and their corresponding power spectra
+- **Real-time Filtering**: Butterworth lowpass filtering with Angstrom-based resolution control
+- **Flexible Fibril Annotation**: Line and polyline tracing tools for straight **and** curved fibrils
+- **Multi-layer Support**: Create separate annotation layers for different fibril types (Aβ42, Tau, α-synuclein, etc.)
+- **Memory Efficient**: Handles large datasets (>GB) using Dask arrays and lazy loading
+- **Annotation Persistence**: Save and load annotations with full metadata preservation
+---
+
 ## **Sort Micrographs by Cross-β Signal**
 
 `sort_micrographs_crossbeta/`  
