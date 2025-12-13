@@ -5,6 +5,7 @@ These tools support micrograph analysis, 2D/3D processing, polymorph clustering,
 
 ## Content
 - [Sort Micrographs by Cross-β Signal](#sort-micrographs-by-cross-β-signal)
+- [Fibril Picking](#napari-based-tool-for-manual-fibril-picking)
 - [Crossover Length Determination](#crossover-length-determination)
 - [Orient 2D Class Averages into the Same Polarity](#orient-2d-class-averages-into-the-same-polarity)
 - [Initial Volume Generation](#initial-volume-generation)
@@ -17,9 +18,19 @@ These tools support micrograph analysis, 2D/3D processing, polymorph clustering,
 - [Density Sharpening](#density-sharpening)
 - [Model-Map FSC](#model-map-fsc)
 
+
 ---
 
-## Napari-based Tool for Manual Fibril Annotation
+## **Sort Micrographs by Cross-β Signal**
+
+`sort_micrographs_crossbeta/`  
+Amyloid fibrils show a characteristic **4.7 Å cross-β reflection** in the Fourier spectrum.  
+This tool computes the signal strength in each micrograph and sorts micrographs according to the visibility of fibrils.  
+This helps to identify micrographs with high fibril content before particle extraction.
+
+---
+
+## Napari-based Tool for Manual Fibril Picking
 This tool is hosted in a separate repository:
 
 https://github.com/sim-som/cryoem_fibril_annotator
@@ -32,15 +43,6 @@ https://github.com/sim-som/cryoem_fibril_annotator
 - **Multi-layer Support**: Create separate annotation layers for different fibril types (Aβ42, Tau, α-synuclein, etc.)
 - **Memory Efficient**: Handles large datasets (>GB) using Dask arrays and lazy loading
 - **Annotation Persistence**: Save and load annotations with full metadata preservation
----
-
-## **Sort Micrographs by Cross-β Signal**
-
-`sort_micrographs_crossbeta/`  
-Amyloid fibrils show a characteristic **4.7 Å cross-β reflection** in the Fourier spectrum.  
-This tool computes the signal strength in each micrograph and sorts micrographs according to the visibility of fibrils.  
-This helps to identify micrographs with high fibril content before particle extraction.
-
 ---
 
 ## **Crossover Length Determination**
