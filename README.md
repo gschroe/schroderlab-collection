@@ -5,6 +5,7 @@ These tools support micrograph analysis, 2D/3D processing, polymorph clustering,
 
 ## Content
 - [Sort Micrographs by Cross-β Signal](#sort-micrographs-by-cross-β-signal)
+- [Fibril Picking](#napari-based-tool-for-manual-fibril-picking)
 - [Crossover Length Determination](#crossover-length-determination)
 - [Orient 2D Class Averages into the Same Polarity](#orient-2d-class-averages-into-the-same-polarity)
 - [Initial Volume Generation](#initial-volume-generation)
@@ -17,9 +18,19 @@ These tools support micrograph analysis, 2D/3D processing, polymorph clustering,
 - [Density Sharpening](#density-sharpening)
 - [Model-Map FSC](#model-map-fsc)
 
+
 ---
 
-## Napari-based Tool for Manual Fibril Annotation
+## **Sort Micrographs by Cross-β Signal**
+
+`sort_micrographs_crossbeta/`  
+Amyloid fibrils show a characteristic **4.7 Å cross-β reflection** in the Fourier spectrum.  
+This tool computes the signal strength in each micrograph and sorts micrographs according to the visibility of fibrils.  
+This helps to identify micrographs with high fibril content before particle extraction.
+
+---
+
+## Napari-based Tool for Manual Fibril Picking
 This tool is hosted in a separate repository:
 
 https://github.com/sim-som/cryoem_fibril_annotator
@@ -32,15 +43,6 @@ https://github.com/sim-som/cryoem_fibril_annotator
 - **Multi-layer Support**: Create separate annotation layers for different fibril types (Aβ42, Tau, α-synuclein, etc.)
 - **Memory Efficient**: Handles large datasets (>GB) using Dask arrays and lazy loading
 - **Annotation Persistence**: Save and load annotations with full metadata preservation
----
-
-## **Sort Micrographs by Cross-β Signal**
-
-`sort_micrographs_crossbeta/`  
-Amyloid fibrils show a characteristic **4.7 Å cross-β reflection** in the Fourier spectrum.  
-This tool computes the signal strength in each micrograph and sorts micrographs according to the visibility of fibrils.  
-This helps to identify micrographs with high fibril content before particle extraction.
-
 ---
 
 ## **Crossover Length Determination**
@@ -125,6 +127,30 @@ These tools are hosted in separate repositories:
     
 
 These programs allow quantitative model–map agreement evaluation, independent of any cryo-EM software package.
+
+---
+# License
+
+schroderlab-collection: Toolcollection for the processing of Cryo-EM Datasets
+
+Copyright (C) 2025  Gunnar Schröder
+
+Copyright (C) 2025  Simon Sommerhage
+
+Copyright (C) 2025  Janus Lammert
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
