@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from star_parser import parse_star_file
+from lib.star_parser import parse_star_file
 
 
 def get_stk_index(rlnReferenceImage: str):
