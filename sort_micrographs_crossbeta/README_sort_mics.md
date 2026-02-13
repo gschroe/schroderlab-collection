@@ -293,6 +293,32 @@ relion_working_directory/
 └── Folder_containing_micrographs/
 ```
 
+---
+
+## Per-Fibril Cross-Beta Scoring (`cross_beta_score_fibril_segments.py`)
+
+A additional tool that calculates cross-beta scores at the **individual fibril** level rather than per-micrograph. This is useful especially useful for filtering automatically picked fibril coordinates, that might contain a substantial amount of false positive picks. For each fibril (identified by micrograph + helical tube ID), it averages the power spectra of all segment images, rotates the PS so the fibril axis is horizontal (using `rlnAnglePsiPrior`), and measures the ~4.75 Å cross-beta signal relative to the background.
+
+### Usage
+
+```bash
+./cross_beta_score_fibril_segments.py /path/to/relion_project particles.star
+```
+
+#### Optional flags
+
+- `--cross-beta-min-threshold <float>`: Write an additional STAR file keeping only fibrils above this score.
+- `--second-particles-star <path>`: Map the computed scores onto a second particle set (matched by fibril hash) and optionally threshold it as well.
+- `--ps-cache <path>`: Cache the per-fibril averaged power spectra as a `.npy` file for faster re-runs with different thresholds.
+
+### Output
+
+The tool writes a `*-cross_beta_scored.star` file containing all original columns plus `per_fibril_cross_beta_score`. When thresholding is enabled, a filtered `*-cross_beta_scored-ths<value>.star` file is also produced.
+
+### Additional requirements
+
+Requires `scikit-image` in addition to the packages listed above.
+
 <!---
 ## Citation
 
