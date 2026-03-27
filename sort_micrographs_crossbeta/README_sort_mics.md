@@ -253,20 +253,6 @@ Process all micrographs and generate a comprehensive report:
   --verbose
 ```
 
-## Troubleshooting
-
-### "Input file not found"
-Ensure the path to the STAR file is correct and the file exists.
-
-### "Radial PS file not found"
-The tool requires CTFFIND4 output files (`*_avrot.txt`). Ensure CTFFIND4 was run successfully and the files are in the expected location relative to the RELION working directory.
-
-### "No micrographs passed CTF resolution filter"
-All micrographs were filtered out due to poor CTF fit. Try increasing `--ctf-max-res` or check your data quality.
-
-### RELION Directory Auto-Detection Fails
-Use `-r, --relion-dir` to explicitly specify the RELION working directory.
-
 ## File Requirements
 
 The tool expects the following RELION/CTFFIND4 file structure:
@@ -297,7 +283,7 @@ relion_working_directory/
 
 ## Per-Fibril Cross-Beta Scoring (`cross_beta_score_fibril_segments.py`)
 
-A additional tool that calculates cross-beta scores at the **individual fibril** level rather than per-micrograph. This is useful especially useful for filtering automatically picked fibril coordinates, that might contain a substantial amount of false positive picks. For each fibril (identified by micrograph + helical tube ID), it averages the power spectra of all segment images, rotates the PS so the fibril axis is horizontal (using `rlnAnglePsiPrior`), and measures the ~4.75 Å cross-beta signal relative to the background.
+A additional tool that calculates cross-beta scores at the **individual fibril** level rather than per-micrograph. This is especially useful for filtering automatically picked fibril coordinates, that might contain a substantial amount of false positive picks. For each fibril (identified by micrograph + helical tube ID), it averages the power spectra of all segment images, rotates the PS so the fibril axis is horizontal (using `rlnAnglePsiPrior`), and measures the ~4.75 Å cross-beta signal relative to the background.
 
 ### Usage
 
