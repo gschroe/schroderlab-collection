@@ -8,7 +8,7 @@ For each fibril (identified by micrograph + helical tube ID), the script:
   3. Measures the signal in the section of the cross-beta ring around the psi-prior (~4.75 A) relative to mean background signal
   4. Writes a scored .star file with a per_fibril_cross_beta_score column
 
-Optionally thresholds and/or maps scores to a second particle set.
+Optional: Map the scores to a second particle set (e.g. one with binning with k_nyquist > 4.75 A)
 """
 
 import argparse
