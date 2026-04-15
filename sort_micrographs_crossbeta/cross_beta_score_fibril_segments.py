@@ -202,7 +202,7 @@ def compute_scores_streaming(part_df: pd.DataFrame,
     for fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
                                total=num_fibrils,
                                desc="Computing PS & scoring fibrils"):
-        mean_ps = compute_fibril_mean_ps(part_df, fibril_df,
+        mean_ps = compute_fibril_mean_ps(fibril_df,
                                          relion_project_dir, angpix)
         scores[fid] = calculate_per_fibril_cross_beta_score(
             mean_ps, psi_priors[fid], k)
@@ -232,7 +232,7 @@ def compute_scores_cached(part_df: pd.DataFrame,
         for _fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
                                     total=num_fibrils,
                                     desc="Computing per-fibril PS"):
-            mean_ps = compute_fibril_mean_ps(part_df, fibril_df,
+            mean_ps = compute_fibril_mean_ps(fibril_df,
                                              relion_project_dir, angpix)
             fibril_powerspectra.append(mean_ps)
 
