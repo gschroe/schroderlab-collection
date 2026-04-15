@@ -13,6 +13,8 @@ Optional: Map the scores to a second particle set (e.g. one with binning with k_
 
 import argparse
 import sys
+import time
+from collections import defaultdict
 from pathlib import Path
 
 import mrcfile
@@ -20,8 +22,34 @@ import numpy as np
 from numpy import fft
 import pandas as pd
 import starfile
+from scipy.fft import rfft2 as scipy_rfft2
 from skimage.transform import rotate
 from tqdm import tqdm
+
+# ---------------------------------------------------------------------------
+# Timing utilities
+# ---------------------------------------------------------------------------
+
+_timers: dict[str, float] = defaultdict(float)
+_timer_counts: dict[str, int] = defaultdict(int)
+
+
+def _t(label: str, start: float) -> None:
+    """Accumulate elapsed time for a named section."""
+    _timers[label] += time.perf_counter() - start
+    _timer_counts[label] += 1
+
+
+def print_timing_report() -> None:
+    print("\n--- Timing report ---")
+    total = sum(_timers.values())
+    for label, elapsed in sorted(_timers.items(), key=lambda x: -x[1]):
+        count = _timer_counts[label]
+        per_call = elapsed / count if count else 0
+        pct = 100 * elapsed / total if total else 0
+        print(f"  {label:<35s} {elapsed:7.2f}s  ({pct:5.1f}%)  "
+              f"n={count}  {per_call*1e3:.2f} ms/call")
+    print(f"  {'TOTAL':<35s} {total:7.2f}s")
 
 
 # ---------------------------------------------------------------------------
@@ -59,18 +87,21 @@ def load_filament_stack(relion_project_dir: Path, particle_stack_mrc: str,
     part_stk_mrc_fpath = relion_project_dir / particle_stack_mrc
     if not part_stk_mrc_fpath.exists():
         raise FileNotFoundError(f"Particle stack not found: {part_stk_mrc_fpath}")
+    t0 = time.perf_counter()
     with mrcfile.open(part_stk_mrc_fpath, mode='r') as f:
         data = f.data
         # Always ensure 3D: (n_particles, Y, X)
         if data.ndim == 2:
             data = data[np.newaxis, ...]
         stk = data[sorted(indices)]
+    _t("load_filament_stack (disk I/O)", t0)
     return stk  # shape: (len(indices), Y, X)
 
 
 
 def padded_powerspectrum(particle_img: np.ndarray, angpix: float):
     """Compute the power spectrum of a particle image with 2x zero-padding."""
+    t0 = time.perf_counter()
     h, w = particle_img.shape
     pad_h, pad_w = h // 2, w // 2
     particle_padded = np.pad(particle_img,
@@ -84,6 +115,7 @@ def padded_powerspectrum(particle_img: np.ndarray, angpix: float):
 
     k = fft.fftfreq(N_pad, angpix)
     k = fft.fftshift(k)
+    _t("padded_powerspectrum (FFT)", t0)
     return ps, k
 
 
@@ -121,9 +153,12 @@ def calculate_per_fibril_cross_beta_score(fib_ps: np.ndarray,
                                           k: np.ndarray,
                                           k_min: float = 1 / 25) -> float:
     """Cross-beta score = mean signal in cross-beta ring / mean background."""
+    t0 = time.perf_counter()
     fib_ps_halign = rotate(fib_ps.copy(), -psi_prior,
                            mode="constant", cval=fib_ps.mean())
+    _t("skimage.rotate (PS alignment)", t0)
 
+    t0 = time.perf_counter()
     kx, ky = np.meshgrid(k, k[::-1])
     k_norm = np.sqrt(kx ** 2 + ky ** 2)
     dc_mask = k_norm <= k_min
@@ -137,6 +172,7 @@ def calculate_per_fibril_cross_beta_score(fib_ps: np.ndarray,
     # Signal in cross-beta ring
     fib_ps_masked = np.ma.masked_array(fib_ps_halign, mask=cross_beta_mask)
     cb_score = float(fib_ps_masked.mean() / mean_bgrd)
+    _t("scoring (mask + ratio)", t0)
     return cb_score
 
 
@@ -406,6 +442,7 @@ def main(argv: list[str] | None = None) -> None:
             write_scored_star(part_data_dict_2, df2_ths, out_ths_2)
 
     print("\nDone.")
+    print_timing_report()
 
 
 if __name__ == "__main__":
