@@ -13,6 +13,10 @@ Optional: Map the scores to a second particle set (e.g. one with binning with k_
 
 import argparse
 import sys
+import threading
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import mrcfile
@@ -22,6 +26,34 @@ import pandas as pd
 import starfile
 from skimage.transform import rotate
 from tqdm import tqdm
+
+# ---------------------------------------------------------------------------
+# Timing utilities
+# ---------------------------------------------------------------------------
+
+_timers: dict[str, float] = defaultdict(float)
+_timer_counts: dict[str, int] = defaultdict(int)
+_timer_lock = threading.Lock()
+
+
+def _t(label: str, start: float) -> None:
+    """Accumulate elapsed time for a named section (thread-safe)."""
+    elapsed = time.perf_counter() - start
+    with _timer_lock:
+        _timers[label] += elapsed
+        _timer_counts[label] += 1
+
+
+def print_timing_report() -> None:
+    print("\n--- Timing report ---")
+    total = sum(_timers.values())
+    for label, elapsed in sorted(_timers.items(), key=lambda x: -x[1]):
+        count = _timer_counts[label]
+        per_call = elapsed / count if count else 0
+        pct = 100 * elapsed / total if total else 0
+        print(f"  {label:<35s} {elapsed:7.2f}s  ({pct:5.1f}%)  "
+              f"n={count}  {per_call*1e3:.2f} ms/call")
+    print(f"  {'TOTAL':<35s} {total:7.2f}s")
 
 
 # ---------------------------------------------------------------------------
@@ -59,18 +91,21 @@ def load_filament_stack(relion_project_dir: Path, particle_stack_mrc: str,
     part_stk_mrc_fpath = relion_project_dir / particle_stack_mrc
     if not part_stk_mrc_fpath.exists():
         raise FileNotFoundError(f"Particle stack not found: {part_stk_mrc_fpath}")
+    t0 = time.perf_counter()
     with mrcfile.open(part_stk_mrc_fpath, mode='r') as f:
         data = f.data
         # Always ensure 3D: (n_particles, Y, X)
         if data.ndim == 2:
             data = data[np.newaxis, ...]
         stk = data[sorted(indices)]
+    _t("load_filament_stack (disk I/O)", t0)
     return stk  # shape: (len(indices), Y, X)
 
 
 
 def padded_powerspectrum(particle_img: np.ndarray, angpix: float):
     """Compute the power spectrum of a particle image with 2x zero-padding."""
+    t0 = time.perf_counter()
     h, w = particle_img.shape
     pad_h, pad_w = h // 2, w // 2
     particle_padded = np.pad(particle_img,
@@ -84,6 +119,7 @@ def padded_powerspectrum(particle_img: np.ndarray, angpix: float):
 
     k = fft.fftfreq(N_pad, angpix)
     k = fft.fftshift(k)
+    _t("padded_powerspectrum (FFT)", t0)
     return ps, k
 
 
@@ -116,20 +152,35 @@ def generate_power_spectrum_mask(k: np.ndarray) -> np.ndarray:
     return ~(cb_mask & psi_mask)
 
 
-def calculate_per_fibril_cross_beta_score(fib_ps: np.ndarray,
-                                          psi_prior: float,
-                                          k: np.ndarray,
-                                          k_min: float = 1 / 25) -> float:
-    """Cross-beta score = mean signal in cross-beta ring / mean background."""
-    fib_ps_halign = rotate(fib_ps.copy(), -psi_prior,
-                           mode="constant", cval=fib_ps.mean())
+def build_scoring_masks(k: np.ndarray, k_min: float = 1 / 25) -> tuple:
+    """Precompute the static masks used by calculate_per_fibril_cross_beta_score.
 
+    These only depend on the frequency array k, so compute once and reuse for
+    every fibril rather than rebuilding on every call.
+
+    Returns
+    -------
+    cross_beta_mask : bool (N, N) — True where cross-beta signal is excluded
+    bkgrd_base_mask : bool (N, N) — True for DC pixels (always background)
+    """
+    cross_beta_mask = generate_power_spectrum_mask(k)
     kx, ky = np.meshgrid(k, k[::-1])
     k_norm = np.sqrt(kx ** 2 + ky ** 2)
     dc_mask = k_norm <= k_min
+    return cross_beta_mask, dc_mask
 
-    cross_beta_mask = generate_power_spectrum_mask(k)
 
+def calculate_per_fibril_cross_beta_score(fib_ps: np.ndarray,
+                                          psi_prior: float,
+                                          cross_beta_mask: np.ndarray,
+                                          dc_mask: np.ndarray) -> float:
+    """Cross-beta score = mean signal in cross-beta ring / mean background."""
+    t0 = time.perf_counter()
+    fib_ps_halign = rotate(fib_ps.copy(), -psi_prior,
+                           mode="constant", cval=fib_ps.mean())
+    _t("skimage.rotate (PS alignment)", t0)
+
+    t0 = time.perf_counter()
     # Background: everything except DC and the cross-beta region
     bkgrd_mask = dc_mask | ~cross_beta_mask
     mean_bgrd = np.ma.masked_array(fib_ps_halign, mask=bkgrd_mask).mean()
@@ -137,6 +188,7 @@ def calculate_per_fibril_cross_beta_score(fib_ps: np.ndarray,
     # Signal in cross-beta ring
     fib_ps_masked = np.ma.masked_array(fib_ps_halign, mask=cross_beta_mask)
     cb_score = float(fib_ps_masked.mean() / mean_bgrd)
+    _t("scoring (mask + ratio)", t0)
     return cb_score
 
 
@@ -183,29 +235,109 @@ def compute_fibril_mean_ps_old(fibril_df: pd.DataFrame,
 def compute_fibril_mean_ps(fibril_df: pd.DataFrame,
                            relion_project_dir: Path,
                            angpix: float) -> np.ndarray:
+    """Return the mean power spectrum for a single fibril.
+
+    All segments are zero-padded and transformed in one batched fft2 call,
+    avoiding per-segment Python overhead compared to the original loop.
+    """
     part_stk_mrc = fibril_df["particle_stack_mrc"].iloc[0]
     indices = fibril_df["stk_index"].tolist()
     fibril_stack = load_filament_stack(relion_project_dir, part_stk_mrc, indices)
-    ps_list = [padded_powerspectrum(p, angpix)[0] for p in fibril_stack]
-    return np.mean(ps_list, axis=0)
+
+    t0 = time.perf_counter()
+    n, h, w = fibril_stack.shape
+    pad_h, pad_w = h // 2, w // 2
+    N_h, N_w = h + 2 * pad_h, w + 2 * pad_w
+
+    padded = np.zeros((n, N_h, N_w), dtype=fibril_stack.dtype)
+    padded[:, pad_h:pad_h + h, pad_w:pad_w + w] = fibril_stack
+
+    # Batch fft2 over all segments, then average the power spectra
+    ps = np.abs(np.fft.fft2(padded)) ** 2        # (n, N_h, N_w)
+    mean_ps = np.fft.fftshift(ps.mean(axis=0))   # (N_h, N_w)
+    _t("padded_powerspectrum (FFT)", t0)
+    return mean_ps
+
+
+def _batch_powerspectrum(particles: np.ndarray) -> np.ndarray:
+    """Compute fftshifted power spectra for a batch of particles.
+
+    Parameters
+    ----------
+    particles : (n, H, W) array
+
+    Returns
+    -------
+    ps_all : (n, N_h, N_w) array — one fftshifted power spectrum per particle,
+             with N_h = H + 2*(H//2), N_w = W + 2*(W//2) (2x zero-padded).
+    """
+    t0 = time.perf_counter()
+    n, h, w = particles.shape
+    pad_h, pad_w = h // 2, w // 2
+    N_h, N_w = h + 2 * pad_h, w + 2 * pad_w
+    padded = np.zeros((n, N_h, N_w), dtype=particles.dtype)
+    padded[:, pad_h:pad_h + h, pad_w:pad_w + w] = particles
+    ps = np.abs(np.fft.fft2(padded)) ** 2
+    ps = np.fft.fftshift(ps, axes=(-2, -1))
+    _t("padded_powerspectrum (FFT)", t0)
+    return ps
+
+
+def _process_stack(stk_mrc: str, stk_df: pd.DataFrame,
+                   relion_project_dir: Path,
+                   psi_priors: np.ndarray,
+                   cross_beta_mask: np.ndarray,
+                   dc_mask: np.ndarray) -> dict[int, float]:
+    """Load one micrograph stack, batch-FFT it, and score all its fibrils.
+
+    Returns a dict mapping fibril_id → cross-beta score.
+    Called from a thread pool — numpy FFT releases the GIL so threads run
+    in parallel on the CPU.
+    """
+    indices = stk_df["stk_index"].tolist()
+    particles = load_filament_stack(relion_project_dir, stk_mrc, indices)
+    ps_all = _batch_powerspectrum(particles)
+
+    idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
+    results: dict[int, float] = {}
+    for fid, fibril_sub_df in stk_df.groupby("fibril_id"):
+        rows = [idx_to_row[i] for i in fibril_sub_df["stk_index"]]
+        mean_ps = ps_all[rows].mean(axis=0)
+        results[fid] = calculate_per_fibril_cross_beta_score(
+            mean_ps, psi_priors[fid], cross_beta_mask, dc_mask)
+    return results
 
 
 def compute_scores_streaming(part_df: pd.DataFrame,
                              relion_project_dir: Path,
                              angpix: float,
-                             k: np.ndarray) -> np.ndarray:
-    """Compute cross-beta scores on-the-fly without storing all PS in memory."""
+                             k: np.ndarray,
+                             n_workers: int = 1) -> np.ndarray:
+    """Compute cross-beta scores on-the-fly without storing all PS in memory.
+
+    Each micrograph stack is processed independently and can run in a thread
+    pool (numpy FFT releases the GIL).  n_workers=1 keeps the original
+    single-threaded behaviour.
+    """
     num_fibrils = part_df["fibril_id"].nunique()
     psi_priors = get_per_fibril_psi_priors(part_df)
+    cross_beta_mask, dc_mask = build_scoring_masks(k)
     scores = np.empty(num_fibrils)
 
-    for fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
-                               total=num_fibrils,
-                               desc="Computing PS & scoring fibrils"):
-        mean_ps = compute_fibril_mean_ps(fibril_df,
-                                         relion_project_dir, angpix)
-        scores[fid] = calculate_per_fibril_cross_beta_score(
-            mean_ps, psi_priors[fid], k)
+    num_stacks = part_df["particle_stack_mrc"].nunique()
+    stack_groups = list(part_df.groupby("particle_stack_mrc"))
+
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = {
+            pool.submit(_process_stack, stk_mrc, stk_df,
+                        relion_project_dir, psi_priors,
+                        cross_beta_mask, dc_mask): stk_mrc
+            for stk_mrc, stk_df in stack_groups
+        }
+        for future in tqdm(as_completed(futures), total=num_stacks,
+                           desc="Computing PS & scoring (per micrograph)"):
+            for fid, score in future.result().items():
+                scores[fid] = score
 
     return scores
 
@@ -214,27 +346,47 @@ def compute_scores_cached(part_df: pd.DataFrame,
                           relion_project_dir: Path,
                           angpix: float,
                           k: np.ndarray,
-                          cache_path: Path) -> np.ndarray:
+                          cache_path: Path,
+                          n_workers: int = 1) -> np.ndarray:
     """Compute scores using a .npy cache for the per-fibril averaged PS.
 
     If the cache exists, power spectra are loaded memory-mapped.
-    Otherwise they are computed, saved to disk, and then scored.
+    Otherwise they are computed (using per-stack batching), saved to disk,
+    and then scored.
     """
     num_fibrils = part_df["fibril_id"].nunique()
     psi_priors = get_per_fibril_psi_priors(part_df)
+    cross_beta_mask, dc_mask = build_scoring_masks(k)
 
     if cache_path.exists():
         print(f"Loading cached power spectra from {cache_path}")
         fibril_ps_arr = np.load(cache_path, mmap_mode="r")
     else:
         print(f"Computing averaged power spectra for {num_fibrils} fibrils ...")
-        fibril_powerspectra = []
-        for _fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
-                                    total=num_fibrils,
-                                    desc="Computing per-fibril PS"):
-            mean_ps = compute_fibril_mean_ps(fibril_df,
-                                             relion_project_dir, angpix)
-            fibril_powerspectra.append(mean_ps)
+        fibril_powerspectra: list = [None] * num_fibrils
+        num_stacks = part_df["particle_stack_mrc"].nunique()
+        stack_groups = list(part_df.groupby("particle_stack_mrc"))
+
+        def _compute_stack_ps(stk_mrc, stk_df):
+            indices = stk_df["stk_index"].tolist()
+            particles = load_filament_stack(relion_project_dir, stk_mrc, indices)
+            ps_all = _batch_powerspectrum(particles)
+            idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
+            result = {}
+            for fid, fibril_sub_df in stk_df.groupby("fibril_id"):
+                rows = [idx_to_row[i] for i in fibril_sub_df["stk_index"]]
+                result[fid] = ps_all[rows].mean(axis=0)
+            return result
+
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = {
+                pool.submit(_compute_stack_ps, stk_mrc, stk_df): stk_mrc
+                for stk_mrc, stk_df in stack_groups
+            }
+            for future in tqdm(as_completed(futures), total=num_stacks,
+                               desc="Computing per-stack PS"):
+                for fid, mean_ps in future.result().items():
+                    fibril_powerspectra[fid] = mean_ps
 
         fibril_ps_arr = np.array(fibril_powerspectra)
         np.save(cache_path, fibril_ps_arr)
@@ -244,7 +396,7 @@ def compute_scores_cached(part_df: pd.DataFrame,
     scores = np.empty(num_fibrils)
     for i in tqdm(range(num_fibrils), desc="Scoring fibrils"):
         scores[i] = calculate_per_fibril_cross_beta_score(
-            fibril_ps_arr[i], psi_priors[i], k)
+            fibril_ps_arr[i], psi_priors[i], cross_beta_mask, dc_mask)
 
     return scores
 
@@ -293,6 +445,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "different thresholds). Without this flag, scores are computed "
              "on-the-fly and no PS are kept in memory.",
     )
+    parser.add_argument(
+        "--n-workers", type=int, default=1,
+        help="Number of parallel worker threads for processing micrograph "
+             "stacks. Each worker loads a stack, batch-FFTs it, and scores "
+             "all fibrils in it. numpy FFT releases the GIL so threads run "
+             "in parallel. Default: 1 (single-threaded).",
+    )
     return parser.parse_args(argv)
 
 
@@ -304,6 +463,7 @@ def main(argv: list[str] | None = None) -> None:
     threshold: float | None = args.cross_beta_min_threshold
     second_star_path: Path | None = args.second_particles_star
     ps_cache: Path | None = args.ps_cache
+    n_workers: int = args.n_workers
 
     # ------------------------------------------------------------------
     # 1. Read primary particle data
@@ -348,10 +508,10 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     if ps_cache is not None:
         cb_scores = compute_scores_cached(
-            part_df, relion_dir, angpix, k, ps_cache)
+            part_df, relion_dir, angpix, k, ps_cache, n_workers)
     else:
         cb_scores = compute_scores_streaming(
-            part_df, relion_dir, angpix, k)
+            part_df, relion_dir, angpix, k, n_workers)
 
     part_df["per_fibril_cross_beta_score"] = part_df["fibril_id"].map(
         lambda fid: cb_scores[fid])
@@ -406,6 +566,7 @@ def main(argv: list[str] | None = None) -> None:
             write_scored_star(part_data_dict_2, df2_ths, out_ths_2)
 
     print("\nDone.")
+    print_timing_report()
 
 
 if __name__ == "__main__":
