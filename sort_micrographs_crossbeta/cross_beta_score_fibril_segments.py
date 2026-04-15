@@ -566,7 +566,7 @@ def main(argv: list[str] | None = None) -> None:
             write_scored_star(part_data_dict_2, df2_ths, out_ths_2)
 
     print("\nDone.")
-    print_timing_report()
+    #print_timing_report()
 
 
 if __name__ == "__main__":
