@@ -22,7 +22,6 @@ import numpy as np
 from numpy import fft
 import pandas as pd
 import starfile
-from scipy.fft import rfft2 as scipy_rfft2
 from skimage.transform import rotate
 from tqdm import tqdm
 
@@ -219,11 +218,28 @@ def compute_fibril_mean_ps_old(fibril_df: pd.DataFrame,
 def compute_fibril_mean_ps(fibril_df: pd.DataFrame,
                            relion_project_dir: Path,
                            angpix: float) -> np.ndarray:
+    """Return the mean power spectrum for a single fibril.
+
+    All segments are zero-padded and transformed in one batched fft2 call,
+    avoiding per-segment Python overhead compared to the original loop.
+    """
     part_stk_mrc = fibril_df["particle_stack_mrc"].iloc[0]
     indices = fibril_df["stk_index"].tolist()
     fibril_stack = load_filament_stack(relion_project_dir, part_stk_mrc, indices)
-    ps_list = [padded_powerspectrum(p, angpix)[0] for p in fibril_stack]
-    return np.mean(ps_list, axis=0)
+
+    t0 = time.perf_counter()
+    n, h, w = fibril_stack.shape
+    pad_h, pad_w = h // 2, w // 2
+    N_h, N_w = h + 2 * pad_h, w + 2 * pad_w
+
+    padded = np.zeros((n, N_h, N_w), dtype=fibril_stack.dtype)
+    padded[:, pad_h:pad_h + h, pad_w:pad_w + w] = fibril_stack
+
+    # Batch fft2 over all segments, then average the power spectra
+    ps = np.abs(np.fft.fft2(padded)) ** 2        # (n, N_h, N_w)
+    mean_ps = np.fft.fftshift(ps.mean(axis=0))   # (N_h, N_w)
+    _t("padded_powerspectrum (FFT)", t0)
+    return mean_ps
 
 
 def compute_scores_streaming(part_df: pd.DataFrame,
@@ -238,8 +254,7 @@ def compute_scores_streaming(part_df: pd.DataFrame,
     for fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
                                total=num_fibrils,
                                desc="Computing PS & scoring fibrils"):
-        mean_ps = compute_fibril_mean_ps(fibril_df,
-                                         relion_project_dir, angpix)
+        mean_ps = compute_fibril_mean_ps(fibril_df, relion_project_dir, angpix)
         scores[fid] = calculate_per_fibril_cross_beta_score(
             mean_ps, psi_priors[fid], k)
 
