@@ -43,7 +43,7 @@ def read_particle_stk(part_stk_fpath: Path):
     return part_stk, angpix
 
 
-def load_filament_stack(relion_project_dir: Path, particle_stack_mrc: str,
+def load_filament_stack_old(relion_project_dir: Path, particle_stack_mrc: str,
                         start_idx: int, end_idx: int) -> np.ndarray:
     part_stk_mrc_fpath = relion_project_dir / particle_stack_mrc
     if not part_stk_mrc_fpath.exists():
@@ -51,6 +51,22 @@ def load_filament_stack(relion_project_dir: Path, particle_stack_mrc: str,
     with mrcfile.open(part_stk_mrc_fpath) as f:
         stk = f.data[start_idx:end_idx + 1]
     return stk
+
+# Load fibril particles
+# Use a list instead of just start and end indices, since particles in between might have been thrown out by Class2D/Class3d -> Selct Subset
+def load_filament_stack(relion_project_dir: Path, particle_stack_mrc: str,
+                        indices: list[int]) -> np.ndarray:
+    part_stk_mrc_fpath = relion_project_dir / particle_stack_mrc
+    if not part_stk_mrc_fpath.exists():
+        raise FileNotFoundError(f"Particle stack not found: {part_stk_mrc_fpath}")
+    with mrcfile.open(part_stk_mrc_fpath, mode='r') as f:
+        data = f.data
+        # Always ensure 3D: (n_particles, Y, X)
+        if data.ndim == 2:
+            data = data[np.newaxis, ...]
+        stk = data[sorted(indices)]
+    return stk  # shape: (len(indices), Y, X)
+
 
 
 def padded_powerspectrum(particle_img: np.ndarray, angpix: float):
@@ -151,8 +167,7 @@ def get_per_fibril_psi_priors(part_df: pd.DataFrame) -> np.ndarray:
     return np.array(psi_priors)
 
 
-def compute_fibril_mean_ps(part_df: pd.DataFrame,
-                           fibril_df: pd.DataFrame,
+def compute_fibril_mean_ps_old(fibril_df: pd.DataFrame,
                            relion_project_dir: Path,
                            angpix: float) -> np.ndarray:
     """Compute the averaged power spectrum for a single fibril."""
@@ -162,6 +177,15 @@ def compute_fibril_mean_ps(part_df: pd.DataFrame,
 
     fibril_stack = load_filament_stack(relion_project_dir, part_stk_mrc,
                                        start_idx, end_idx)
+    ps_list = [padded_powerspectrum(p, angpix)[0] for p in fibril_stack]
+    return np.mean(ps_list, axis=0)
+
+def compute_fibril_mean_ps(fibril_df: pd.DataFrame,
+                           relion_project_dir: Path,
+                           angpix: float) -> np.ndarray:
+    part_stk_mrc = fibril_df["particle_stack_mrc"].iloc[0]
+    indices = fibril_df["stk_index"].tolist()
+    fibril_stack = load_filament_stack(relion_project_dir, part_stk_mrc, indices)
     ps_list = [padded_powerspectrum(p, angpix)[0] for p in fibril_stack]
     return np.mean(ps_list, axis=0)
 
@@ -303,12 +327,20 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     # 3. Spatial frequency array (from a single example particle)
     # ------------------------------------------------------------------
+    #example_stk = load_filament_stack(
+    #     relion_dir,
+    #     part_df["particle_stack_mrc"].iloc[0],
+    #     part_df["stk_index"].iloc[0],
+    #     part_df["stk_index"].iloc[0],
+    # )
     example_stk = load_filament_stack(
         relion_dir,
         part_df["particle_stack_mrc"].iloc[0],
-        part_df["stk_index"].iloc[0],
-        part_df["stk_index"].iloc[0],
+        [part_df["stk_index"].iloc[0]],
     )
+
+
+
     _, k = padded_powerspectrum(example_stk[0], angpix)
 
     # ------------------------------------------------------------------
