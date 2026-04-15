@@ -242,21 +242,60 @@ def compute_fibril_mean_ps(fibril_df: pd.DataFrame,
     return mean_ps
 
 
+def _batch_powerspectrum(particles: np.ndarray) -> np.ndarray:
+    """Compute fftshifted power spectra for a batch of particles.
+
+    Parameters
+    ----------
+    particles : (n, H, W) array
+
+    Returns
+    -------
+    ps_all : (n, N_h, N_w) array — one fftshifted power spectrum per particle,
+             with N_h = H + 2*(H//2), N_w = W + 2*(W//2) (2x zero-padded).
+    """
+    t0 = time.perf_counter()
+    n, h, w = particles.shape
+    pad_h, pad_w = h // 2, w // 2
+    N_h, N_w = h + 2 * pad_h, w + 2 * pad_w
+    padded = np.zeros((n, N_h, N_w), dtype=particles.dtype)
+    padded[:, pad_h:pad_h + h, pad_w:pad_w + w] = particles
+    ps = np.abs(np.fft.fft2(padded)) ** 2
+    ps = np.fft.fftshift(ps, axes=(-2, -1))
+    _t("padded_powerspectrum (FFT)", t0)
+    return ps
+
+
 def compute_scores_streaming(part_df: pd.DataFrame,
                              relion_project_dir: Path,
                              angpix: float,
                              k: np.ndarray) -> np.ndarray:
-    """Compute cross-beta scores on-the-fly without storing all PS in memory."""
+    """Compute cross-beta scores on-the-fly without storing all PS in memory.
+
+    Iterates over micrograph stacks rather than individual fibrils so each
+    .mrcs file is opened once and all its particles are FFT-ed in a single
+    batched call.
+    """
     num_fibrils = part_df["fibril_id"].nunique()
     psi_priors = get_per_fibril_psi_priors(part_df)
     scores = np.empty(num_fibrils)
 
-    for fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
-                               total=num_fibrils,
-                               desc="Computing PS & scoring fibrils"):
-        mean_ps = compute_fibril_mean_ps(fibril_df, relion_project_dir, angpix)
-        scores[fid] = calculate_per_fibril_cross_beta_score(
-            mean_ps, psi_priors[fid], k)
+    num_stacks = part_df["particle_stack_mrc"].nunique()
+    for stk_mrc, stk_df in tqdm(part_df.groupby("particle_stack_mrc"),
+                                 total=num_stacks,
+                                 desc="Computing PS & scoring (per micrograph)"):
+        indices = stk_df["stk_index"].tolist()
+        particles = load_filament_stack(relion_project_dir, stk_mrc, indices)
+        ps_all = _batch_powerspectrum(particles)  # (n, N, N)
+
+        # load_filament_stack loads rows in sorted(indices) order
+        idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
+
+        for fid, fibril_sub_df in stk_df.groupby("fibril_id"):
+            rows = [idx_to_row[i] for i in fibril_sub_df["stk_index"]]
+            mean_ps = ps_all[rows].mean(axis=0)
+            scores[fid] = calculate_per_fibril_cross_beta_score(
+                mean_ps, psi_priors[fid], k)
 
     return scores
 
@@ -269,7 +308,8 @@ def compute_scores_cached(part_df: pd.DataFrame,
     """Compute scores using a .npy cache for the per-fibril averaged PS.
 
     If the cache exists, power spectra are loaded memory-mapped.
-    Otherwise they are computed, saved to disk, and then scored.
+    Otherwise they are computed (using per-stack batching), saved to disk,
+    and then scored.
     """
     num_fibrils = part_df["fibril_id"].nunique()
     psi_priors = get_per_fibril_psi_priors(part_df)
@@ -279,13 +319,19 @@ def compute_scores_cached(part_df: pd.DataFrame,
         fibril_ps_arr = np.load(cache_path, mmap_mode="r")
     else:
         print(f"Computing averaged power spectra for {num_fibrils} fibrils ...")
-        fibril_powerspectra = []
-        for _fid, fibril_df in tqdm(part_df.groupby("fibril_id"),
-                                    total=num_fibrils,
-                                    desc="Computing per-fibril PS"):
-            mean_ps = compute_fibril_mean_ps(fibril_df,
-                                             relion_project_dir, angpix)
-            fibril_powerspectra.append(mean_ps)
+        fibril_powerspectra = [None] * num_fibrils
+        num_stacks = part_df["particle_stack_mrc"].nunique()
+        for stk_mrc, stk_df in tqdm(part_df.groupby("particle_stack_mrc"),
+                                     total=num_stacks,
+                                     desc="Computing per-stack PS"):
+            indices = stk_df["stk_index"].tolist()
+            particles = load_filament_stack(relion_project_dir, stk_mrc, indices)
+            ps_all = _batch_powerspectrum(particles)
+
+            idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
+            for fid, fibril_sub_df in stk_df.groupby("fibril_id"):
+                rows = [idx_to_row[i] for i in fibril_sub_df["stk_index"]]
+                fibril_powerspectra[fid] = ps_all[rows].mean(axis=0)
 
         fibril_ps_arr = np.array(fibril_powerspectra)
         np.save(cache_path, fibril_ps_arr)
