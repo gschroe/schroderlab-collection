@@ -86,7 +86,7 @@ def load_filament_stack_old(relion_project_dir: Path, particle_stack_mrc: str,
 
 # Load fibril particles
 # Use a list instead of just start and end indices, since particles in between might have been thrown out by Class2D/Class3d -> Selct Subset
-def load_filament_stack(relion_project_dir: Path, particle_stack_mrc: str,
+def load_particles_from_stack(relion_project_dir: Path, particle_stack_mrc: str,
                         indices: list[int]) -> np.ndarray:
     part_stk_mrc_fpath = relion_project_dir / particle_stack_mrc
     if not part_stk_mrc_fpath.exists():
@@ -227,7 +227,7 @@ def compute_fibril_mean_ps_old(fibril_df: pd.DataFrame,
     end_idx = fibril_df["stk_index"].max()
     part_stk_mrc = fibril_df["particle_stack_mrc"].iloc[0]
 
-    fibril_stack = load_filament_stack(relion_project_dir, part_stk_mrc,
+    fibril_stack = load_particles_from_stack(relion_project_dir, part_stk_mrc,
                                        start_idx, end_idx)
     ps_list = [padded_powerspectrum(p, angpix)[0] for p in fibril_stack]
     return np.mean(ps_list, axis=0)
@@ -242,7 +242,7 @@ def compute_fibril_mean_ps(fibril_df: pd.DataFrame,
     """
     part_stk_mrc = fibril_df["particle_stack_mrc"].iloc[0]
     indices = fibril_df["stk_index"].tolist()
-    fibril_stack = load_filament_stack(relion_project_dir, part_stk_mrc, indices)
+    fibril_stack = load_particles_from_stack(relion_project_dir, part_stk_mrc, indices)
 
     t0 = time.perf_counter()
     n, h, w = fibril_stack.shape
@@ -277,7 +277,13 @@ def _batch_powerspectrum(particles: np.ndarray) -> np.ndarray:
     N_h, N_w = h + 2 * pad_h, w + 2 * pad_w
     padded = np.zeros((n, N_h, N_w), dtype=particles.dtype)
     padded[:, pad_h:pad_h + h, pad_w:pad_w + w] = particles
-    ps = np.abs(np.fft.fft2(padded)) ** 2
+
+    fft_result = np.fft.fft2(padded)
+    del padded
+
+    ps = np.abs(fft_result) ** 2
+    del fft_result
+
     ps = np.fft.fftshift(ps, axes=(-2, -1))
     _t("padded_powerspectrum (FFT)", t0)
     return ps
@@ -295,8 +301,9 @@ def _process_stack(stk_mrc: str, stk_df: pd.DataFrame,
     in parallel on the CPU.
     """
     indices = stk_df["stk_index"].tolist()
-    particles = load_filament_stack(relion_project_dir, stk_mrc, indices)
+    particles = load_particles_from_stack(relion_project_dir, stk_mrc, indices)
     ps_all = _batch_powerspectrum(particles)
+    del particles # free memorry before scoring loop
 
     idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
     results: dict[int, float] = {}
@@ -369,7 +376,7 @@ def compute_scores_cached(part_df: pd.DataFrame,
 
         def _compute_stack_ps(stk_mrc, stk_df):
             indices = stk_df["stk_index"].tolist()
-            particles = load_filament_stack(relion_project_dir, stk_mrc, indices)
+            particles = load_particles_from_stack(relion_project_dir, stk_mrc, indices)
             ps_all = _batch_powerspectrum(particles)
             idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
             result = {}
@@ -493,7 +500,7 @@ def main(argv: list[str] | None = None) -> None:
     #     part_df["stk_index"].iloc[0],
     #     part_df["stk_index"].iloc[0],
     # )
-    example_stk = load_filament_stack(
+    example_stk = load_particles_from_stack(
         relion_dir,
         part_df["particle_stack_mrc"].iloc[0],
         [part_df["stk_index"].iloc[0]],
