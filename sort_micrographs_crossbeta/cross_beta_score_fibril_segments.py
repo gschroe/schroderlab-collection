@@ -27,6 +27,9 @@ import starfile
 from skimage.transform import rotate
 from tqdm import tqdm
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 # ---------------------------------------------------------------------------
 # Timing utilities
 # ---------------------------------------------------------------------------
@@ -459,6 +462,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "all fibrils in it. numpy FFT releases the GIL so threads run "
              "in parallel. Default: 1 (single-threaded).",
     )
+    parser.add_argument(
+        "--plot", action="store_true", default=False,
+        help="Save diagnostic plots (histogram and scatter plot) of the "
+             "per-fibril cross-beta scores next to the input .star file.",
+    )
     return parser.parse_args(argv)
 
 
@@ -471,6 +479,7 @@ def main(argv: list[str] | None = None) -> None:
     second_star_path: Path | None = args.second_particles_star
     ps_cache: Path | None = args.ps_cache
     n_workers: int = args.n_workers
+    do_plot: bool = args.plot
 
     # ------------------------------------------------------------------
     # 1. Read primary particle data
@@ -522,6 +531,33 @@ def main(argv: list[str] | None = None) -> None:
 
     part_df["per_fibril_cross_beta_score"] = part_df["fibril_id"].map(
         lambda fid: cb_scores[fid])
+    
+    if do_plot:
+        fibril_scores = (part_df.groupby("fibril_id")
+                         [["fibril_hash", "per_fibril_cross_beta_score"]]
+                         .first()
+                         .reset_index())
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        sns.histplot(fibril_scores, x="per_fibril_cross_beta_score", ax=axes[0])
+        axes[0].set_xlabel("per_fibril_cross_beta_score")
+        axes[0].set_title("Score distribution")
+
+        axes[1].scatter(fibril_scores.index, fibril_scores["per_fibril_cross_beta_score"],
+                        s=5, alpha=0.5)
+        axes[1].set_xlabel("fibril_id")
+        axes[1].set_ylabel("per_fibril_cross_beta_score")
+        axes[1].set_title("Score per fibril")
+        if threshold is not None:
+            axes[1].axhline(threshold, color="red", linestyle="--", linewidth=1)
+
+        fig.tight_layout()
+        plot_fp = star_path.parent / "per_fibril_cross_beta_score.png"
+        fig.savefig(plot_fp)
+        plt.close(fig)
+        print(f"Saved plot to {plot_fp}")
+    
 
     # ------------------------------------------------------------------
     # 5. Write scored primary star file
