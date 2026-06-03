@@ -362,31 +362,37 @@ def compute_scores_cached(part_df: pd.DataFrame,
 
     If the cache exists, power spectra are loaded memory-mapped.
     Otherwise they are computed (using per-stack batching), saved to disk,
-    and then scored.
+    and then scored.  During the build phase each fibril's PS is written
+    directly into a memory-mapped .npy file, so RAM holds at most
+    n_workers stacks worth of data at any time.
     """
     num_fibrils = part_df["fibril_id"].nunique()
     psi_priors = get_per_fibril_psi_priors(part_df)
     cross_beta_mask, dc_mask = build_scoring_masks(k)
+    ps_size = len(k)
 
     if cache_path.exists():
         print(f"Loading cached power spectra from {cache_path}")
         fibril_ps_arr = np.load(cache_path, mmap_mode="r")
     else:
         print(f"Computing averaged power spectra for {num_fibrils} fibrils ...")
-        fibril_powerspectra: list = [None] * num_fibrils
-        num_stacks = part_df["particle_stack_mrc"].nunique()
+        # Allocate directly on disk — no per-fibril PS accumulates in RAM.
+        fibril_ps_arr = np.lib.format.open_memmap(
+            cache_path, mode="w+", dtype=np.float64,
+            shape=(num_fibrils, ps_size, ps_size))
+
         stack_groups = list(part_df.groupby("particle_stack_mrc"))
+        num_stacks = len(stack_groups)
 
         def _compute_stack_ps(stk_mrc, stk_df):
             indices = stk_df["stk_index"].tolist()
             particles = load_particles_from_stack(relion_project_dir, stk_mrc, indices)
             ps_all = _batch_powerspectrum(particles)
+            del particles
             idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
-            result = {}
             for fid, fibril_sub_df in stk_df.groupby("fibril_id"):
                 rows = [idx_to_row[i] for i in fibril_sub_df["stk_index"]]
-                result[fid] = ps_all[rows].mean(axis=0)
-            return result
+                fibril_ps_arr[fid] = ps_all[rows].mean(axis=0)
 
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             futures = {
@@ -395,13 +401,12 @@ def compute_scores_cached(part_df: pd.DataFrame,
             }
             for future in tqdm(as_completed(futures), total=num_stacks,
                                desc="Computing per-stack PS"):
-                for fid, mean_ps in future.result().items():
-                    fibril_powerspectra[fid] = mean_ps
+                future.result()
 
-        fibril_ps_arr = np.array(fibril_powerspectra)
-        np.save(cache_path, fibril_ps_arr)
+        fibril_ps_arr.flush()
+        del fibril_ps_arr
         print(f"Saved power spectra cache to {cache_path}")
-        del fibril_powerspectra
+        fibril_ps_arr = np.load(cache_path, mmap_mode="r")
 
     scores = np.empty(num_fibrils)
     for i in tqdm(range(num_fibrils), desc="Scoring fibrils"):
