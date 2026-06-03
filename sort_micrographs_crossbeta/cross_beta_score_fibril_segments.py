@@ -303,6 +303,7 @@ def _process_stack(stk_mrc: str, stk_df: pd.DataFrame,
     Called from a thread pool — numpy FFT releases the GIL so threads run
     in parallel on the CPU.
     """
+    tqdm.write(f"[stack] {stk_mrc}")
     indices = stk_df["stk_index"].tolist()
     particles = load_particles_from_stack(relion_project_dir, stk_mrc, indices)
     ps_all = _batch_powerspectrum(particles)
@@ -346,8 +347,12 @@ def compute_scores_streaming(part_df: pd.DataFrame,
         }
         for future in tqdm(as_completed(futures), total=num_stacks,
                            desc="Computing PS & scoring (per micrograph)"):
-            for fid, score in future.result().items():
-                scores[fid] = score
+            stk_mrc = futures[future]
+            try:
+                for fid, score in future.result().items():
+                    scores[fid] = score
+            except Exception as exc:
+                raise RuntimeError(f"Failed processing stack: {stk_mrc}") from exc
 
     return scores
 
@@ -385,6 +390,7 @@ def compute_scores_cached(part_df: pd.DataFrame,
         num_stacks = len(stack_groups)
 
         def _compute_stack_ps(stk_mrc, stk_df):
+            tqdm.write(f"[stack] {stk_mrc}")
             indices = stk_df["stk_index"].tolist()
             particles = load_particles_from_stack(relion_project_dir, stk_mrc, indices)
             ps_all = _batch_powerspectrum(particles)
@@ -401,7 +407,11 @@ def compute_scores_cached(part_df: pd.DataFrame,
             }
             for future in tqdm(as_completed(futures), total=num_stacks,
                                desc="Computing per-stack PS"):
-                future.result()
+                stk_mrc = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:
+                    raise RuntimeError(f"Failed processing stack: {stk_mrc}") from exc
 
         fibril_ps_arr.flush()
         del fibril_ps_arr
@@ -472,6 +482,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Save diagnostic plots (histogram and scatter plot) of the "
              "per-fibril cross-beta scores next to the input .star file.",
     )
+    parser.add_argument(
+        "--test-stack", type=str, default=None,
+        metavar="STACK_SUBSTRING",
+        help="Debug mode: filter particles to stacks whose path contains "
+             "STACK_SUBSTRING, then run the full pipeline single-threaded "
+             "with full tracebacks. Exits after processing without writing "
+             "any output files.",
+    )
     return parser.parse_args(argv)
 
 
@@ -485,6 +503,7 @@ def main(argv: list[str] | None = None) -> None:
     ps_cache: Path | None = args.ps_cache
     n_workers: int = args.n_workers
     do_plot: bool = args.plot
+    test_stack: str | None = args.test_stack
 
     # ------------------------------------------------------------------
     # 1. Read primary particle data
@@ -523,6 +542,44 @@ def main(argv: list[str] | None = None) -> None:
 
 
     _, k = padded_powerspectrum(example_stk[0], angpix)
+
+    # ------------------------------------------------------------------
+    # 3b. --test-stack: run one stack single-threaded and exit
+    # ------------------------------------------------------------------
+    if test_stack is not None:
+        mask = part_df["particle_stack_mrc"].str.contains(test_stack, regex=False)
+        test_df = part_df[mask]
+        if test_df.empty:
+            print(f"ERROR: no particles found whose stack path contains '{test_stack}'")
+            print("Known stacks (first 10):")
+            for s in part_df["particle_stack_mrc"].unique()[:10]:
+                print(f"  {s}")
+            sys.exit(1)
+        matched = test_df["particle_stack_mrc"].unique()
+        print(f"--test-stack: found {len(matched)} matching stack(s), "
+              f"{len(test_df)} particles, "
+              f"{test_df['fibril_id'].nunique()} fibrils")
+        for stk in matched:
+            print(f"  Testing: {stk}")
+            stk_df = test_df[test_df["particle_stack_mrc"] == stk]
+            indices = stk_df["stk_index"].tolist()
+            print(f"    Loading {len(indices)} particles ...")
+            particles = load_particles_from_stack(relion_dir, stk, indices)
+            print(f"    Loaded shape: {particles.shape}, dtype: {particles.dtype}")
+            print(f"    Computing power spectra ...")
+            ps_all = _batch_powerspectrum(particles)
+            print(f"    PS shape: {ps_all.shape}, dtype: {ps_all.dtype}")
+            cross_beta_mask, dc_mask = build_scoring_masks(k)
+            psi_priors = get_per_fibril_psi_priors(test_df)
+            idx_to_row = {idx: row for row, idx in enumerate(sorted(indices))}
+            for fid, fibril_sub_df in stk_df.groupby("fibril_id"):
+                rows = [idx_to_row[i] for i in fibril_sub_df["stk_index"]]
+                mean_ps = ps_all[rows].mean(axis=0)
+                score = calculate_per_fibril_cross_beta_score(
+                    mean_ps, psi_priors[fid], cross_beta_mask, dc_mask)
+                print(f"    fibril {fid}: score={score:.4f}")
+        print("--test-stack done, exiting.")
+        sys.exit(0)
 
     # ------------------------------------------------------------------
     # 4. Compute cross-beta scores
