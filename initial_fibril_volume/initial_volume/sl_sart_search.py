@@ -95,20 +95,27 @@ def apply_cylindrical_mask(volume, radius):
     return np.where(mask3d, volume, 0)
 
 
-
-def helical_3d_map_from_section_cubic(cross_section, degrees=180, output_file="helical_density.mrc", radius=None, apix=1.0):
+def helical_3d_map_from_section_cubic(cross_section, degrees=180, box_length_x=None, output_file="helical_density.mrc", radius=None, apix=1.0):
     """
     Create a 3D cubic helical density map from a 2D cross-section.
-    Each z-slice rotates by twist_per_slice so the full box covers the specified degrees.
-    The output shape is (N, N, N), with N = cross_section.shape[0].
+    twist_per_slice is derived from box_length_x, the number of pixels along the
+    filament axis that the SART sinogram spanned to cover `degrees` of rotation.
+    The output shape is (N, N, N), with N = cross_section.shape[0], so the volume
+    generally does not span the full `degrees` (box_length_x is usually >> N for
+    long, low-twist filaments) it just reproduces the correct twist per pixel.
 
     Parameters:
       cross_section : 2D numpy array, shape (N, N)
-      degrees : int, 180 or 360 (the angular span covered)
+      degrees : int, 180 or 360 (the angular span the sinogram covered)
+      box_length_x : int, number of pixels along the filament axis that spanned `degrees`
       output_file : str or Path
     """
+
     N = cross_section.shape[0]
-    twist_per_slice = degrees / N
+    if box_length_x is None:
+        box_length_x = N
+    twist_per_slice = degrees / box_length_x
+
     volume = np.zeros((N, N, N), dtype=np.float32)
     for i in range(N):
         angle = i * twist_per_slice
@@ -243,8 +250,8 @@ def main():
 
     # Angle and shift ranges
     ang_start, ang_end, ang_step = args.angles
-    if (ang_step < 1):
-        ang_step = 1
+    #if (ang_step < 1):
+        #ang_step = 1
     shift_start, shift_end, shift_step = args.shifts
     if (shift_step < 1):
         shift_step = 1
@@ -363,7 +370,8 @@ def main():
 
     # Write 3D volume
     out_mrc = output_dir / "helical_density_best.mrc"
-    helical_3d_map_from_section_cubic(best_recon, degrees=theta_max, output_file=out_mrc, radius=args.radius, apix=args.apix)
+    #helical_3d_map_from_section_cubic(best_recon, degrees=theta_max, output_file=out_mrc, radius=args.radius, apix=args.apix)
+    helical_3d_map_from_section_cubic(best_recon, degrees=theta_max, box_length_x=best_box_length_x, output_file=out_mrc, radius=args.radius,     apix=args.apix)
     #helical_3d_map_from_section(best_recon, n_slices, degrees, output_file="helical_density.mrc")
 
 
