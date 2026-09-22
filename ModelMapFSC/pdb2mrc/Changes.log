@@ -1,0 +1,86 @@
+Changes.log
+============
+
+Session date: 2026-09-22
+Files affected: dxpdb2mrc.c, dxpdb2mrc-bfactor.c
+(Both files received identical changes.)
+
+
+1. Fixed ringing in the resolution filter
+------------------------------------------------------------
+
+Fix:
+  Modified soft-edged raised-cosine (Hann-style)
+  taper centered on the cutoff frequency:
+    - weight = 1.0                                            for fmag <= f1
+    - weight = 0.5*(1 + cos(pi*(fmag-f1)/(f2-f1)))             for f1 < fmag < f2
+    - weight = 0.0                                             for fmag >= f2
+  where f1 = cutoff_freq - edge_width/2, f2 = cutoff_freq + edge_width/2.
+  Fourier coefficients are multiplied by this weight instead of being
+  zeroed outright.
+
+New CLI option:
+  -res_edge <width>   Taper width in 1/Å, centered on the resolution cutoff.
+                       If not given, defaults to 0.2/resolution (i.e. a
+                       taper spanning 20% of the cutoff frequency).
+
+Other related edits:
+  - Added an #ifndef M_PI guard (some platforms/standards don't define it
+    in math.h) near the top of each file.
+  - apply_resolution_filter() signature gained an edge_width parameter.
+  - Usage string and main() updated to parse/pass -res_edge.
+
+
+2. Added mask generation around the atomic model
+------------------------------------------------------------
+
+New feature: the program can now additionally compute and write a soft mask
+on the same grid (box size, pixel size, origin) as the density map.
+
+Algorithm (all new functions, added just before the Peng kernel section):
+
+  a) build_atom_mask()
+     For every atom, marks mask[voxel] = 1 for all voxels within
+     -mask_radius Å of the atom center (hard sphere test), using the same
+     walk-splat traversal pattern as the density renderer pDenRenderPeng.
+     This is the binary "core" mask.
+
+  b) Optional pre-filter (only if -mask_smooth > 0):
+     gaussian_smooth_fft() Gaussian-blurs the binary core mask in Fourier
+     space (multiply by exp(-2*pi^2*sigma^2*f^2), sigma = -mask_smooth in Å;
+     a Gaussian filter has no sharp edge in Fourier space, so it does not
+     introduce ringing), then threshold_binary() re-binarizes the result at
+     0.5. This rounds off the voxel-staircase edges left by the discrete
+     atom-sphere splat in step (a) before cushion/edge are added.
+
+  c) distance_transform_3d()
+     Computes the exact Euclidean distance (in voxel units) from every grid
+     point to the nearest core-mask voxel, using a separable O(N) squared
+     distance transform (Felzenszwalb & Huttenlocher algorithm: three 1D
+     passes, one per axis, via the internal dt_1d() helper). This gives a
+     true geometric distance field rather than a per-atom approximation.
+
+  d) mask_from_distance()
+     Converts the distance field into the final soft mask using the same
+     raised-cosine taper shape as the resolution filter, but applied in
+     real (distance) space instead of Fourier space:
+       - mask = 1.0                                   for dist <= cushion
+       - mask = 0.5*(1+cos(pi*(dist-cushion)/edge))    for cushion < dist < cushion+edge
+       - mask = 0.0                                    for dist >= cushion+edge
+
+New CLI options:
+  -mask_out <file.mrc>   Enables mask computation/output; if omitted, no
+                          mask is built (feature is fully opt-in).
+  -mask_radius <Å>       Core radius around each atom. Default 1.5.
+  -mask_cushion <Å>      Extra distance beyond the core kept at full
+                          weight (1.0). Default 3.0.
+  -mask_edge <Å>         Raised-cosine taper width from 1 to 0, applied
+                          beyond the cushion. Default 5.0.
+  -mask_smooth <Å>       Gaussian sigma for the optional pre-filter step
+                          described in (b) above. Default 0.0 (disabled).
+
+Output:
+  If -mask_out is given, the mask is written as its own MRC file (mode 2,
+  float) using the same header geometry (box, pixel size, origin) as the
+  density map, with its own amin/amax/amean computed from the mask data.
+
