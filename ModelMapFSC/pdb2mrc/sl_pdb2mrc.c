@@ -17,8 +17,8 @@
  * Compile with:
  *    gcc -O2 -o dxpdb2mrc dxpdb2mrc.c -lm -lfftw3f
  *
- * Author: Gunnar F. Schroeder
- * Date: Apr 1, 2025
+ * Author: Gunnar F. Schroeder / Claude Code
+ * Date: Sep 22, 2026
  */
 
 /* 
@@ -39,12 +39,16 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see https://www.gnu.org/licenses/.
 */
 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <fftw3.h>
-#include <time.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 #define HEADER_SIZE 1024
 #define MAX_LINE 256
@@ -154,16 +158,26 @@ int write_mrc(const char *filename, MRCHeader *header, float *data) {
     return 0;
 }
 
-/* Resolution filtering using FFTW */
-void apply_resolution_filter(float *density, int nx, int ny, int nz, double angpix, double resolution) {
+/* Resolution filtering using FFTW.
+ * Uses a soft-edged (raised-cosine) low-pass filter rather than a hard
+ * brick-wall cutoff: a sharp cutoff in Fourier space is equivalent to
+ * convolving the real-space map with a sinc function, which produces
+ * Gibbs-phenomenon ringing artifacts around every feature. Tapering the
+ * cutoff over a transition band removes that ringing.
+ * edge_width is the full width (in 1/Å) of the taper, centered on cutoff_freq.
+ */
+void apply_resolution_filter(float *density, int nx, int ny, int nz, double angpix, double resolution, double edge_width) {
     int nz_complex = nz/2 + 1;
     int nvox = nx * ny * nz;
     fftwf_complex *fft_data = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * nx * ny * nz_complex);
     fftwf_plan plan_forward = fftwf_plan_dft_r2c_3d(nx, ny, nz, density, fft_data, FFTW_ESTIMATE);
     fftwf_execute(plan_forward);
-    
+
     double cutoff_freq = 1.0 / resolution;
-    
+    double f1 = cutoff_freq - 0.5 * edge_width;
+    double f2 = cutoff_freq + 0.5 * edge_width;
+    if (f1 < 0.0) f1 = 0.0;
+
     for (int i = 0; i < nx; i++) {
         double fx = (i <= nx/2) ? ((double)i/(nx*angpix)) : ((double)(i - nx)/(nx*angpix));
         for (int j = 0; j < ny; j++) {
@@ -172,14 +186,22 @@ void apply_resolution_filter(float *density, int nx, int ny, int nz, double angp
                 double fz = (double)k/(nz*angpix);
                 double fmag = sqrt(fx*fx + fy*fy + fz*fz);
                 int idx = i*(ny*nz_complex) + j*nz_complex + k;
-                if (fmag > cutoff_freq) {
-                    fft_data[idx][0] = 0.0f;
-                    fft_data[idx][1] = 0.0f;
+                double weight;
+                if (fmag <= f1) {
+                    weight = 1.0;
+                } else if (fmag >= f2) {
+                    weight = 0.0;
+                } else {
+                    weight = 0.5 * (1.0 + cos(M_PI * (fmag - f1) / (f2 - f1)));
+                }
+                if (weight < 1.0) {
+                    fft_data[idx][0] *= (float)weight;
+                    fft_data[idx][1] *= (float)weight;
                 }
             }
         }
     }
-    
+
     fftwf_plan plan_backward = fftwf_plan_dft_c2r_3d(nx, ny, nz, fft_data, density, FFTW_ESTIMATE);
     fftwf_execute(plan_backward);
     for (int i = 0; i < nvox; i++) {
@@ -189,6 +211,208 @@ void apply_resolution_filter(float *density, int nx, int ny, int nz, double angp
     fftwf_destroy_plan(plan_forward);
     fftwf_destroy_plan(plan_backward);
     fftwf_free(fft_data);
+}
+
+/* -------------------- Mask Generation -------------------- */
+
+/* 1D squared-distance transform (Felzenszwalb & Huttenlocher).
+ * f holds 0 for a "foreground seed" and a large value (DT_INF) for background,
+ * indexed along one line of the grid. d receives the squared distance (in
+ * voxel units^2) from each position to the nearest seed on that line.
+ */
+#define DT_INF 1e20
+
+static void dt_1d(const double *f, double *d, int n, int *v, double *z) {
+    int k = 0;
+    v[0] = 0;
+    z[0] = -DT_INF;
+    z[1] = DT_INF;
+    for (int q = 1; q < n; q++) {
+        double s;
+        while (1) {
+            int vk = v[k];
+            s = ((f[q] + (double)q * q) - (f[vk] + (double)vk * vk)) / (2.0 * q - 2.0 * vk);
+            if (s <= z[k])
+                k--;
+            else
+                break;
+        }
+        k++;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = DT_INF;
+    }
+    k = 0;
+    for (int q = 0; q < n; q++) {
+        while (z[k + 1] < q)
+            k++;
+        int vk = v[k];
+        d[q] = (double)(q - vk) * (q - vk) + f[vk];
+    }
+}
+
+/* Computes the squared Euclidean distance (in voxel units^2) from every grid
+ * point to the nearest voxel where mask >= 0.5, via three separable 1D passes.
+ * dist2 must be preallocated with nx*ny*nz doubles; it is filled in-place.
+ */
+void distance_transform_3d(const float *mask, double *dist2, int nx, int ny, int nz) {
+    size_t nvox = (size_t)nx * ny * nz;
+    for (size_t idx = 0; idx < nvox; idx++)
+        dist2[idx] = (mask[idx] >= 0.5f) ? 0.0 : DT_INF;
+
+    int maxdim = nx;
+    if (ny > maxdim) maxdim = ny;
+    if (nz > maxdim) maxdim = nz;
+    double *row_in = (double*)malloc(maxdim * sizeof(double));
+    double *row_out = (double*)malloc(maxdim * sizeof(double));
+    int *v = (int*)malloc(maxdim * sizeof(int));
+    double *z = (double*)malloc((maxdim + 1) * sizeof(double));
+
+    size_t dim2 = (size_t)nx;
+    size_t dim3 = (size_t)nx * ny;
+
+    /* Pass along x */
+    for (int k = 0; k < nz; k++) {
+        for (int j = 0; j < ny; j++) {
+            size_t base = (size_t)j * dim2 + (size_t)k * dim3;
+            for (int i = 0; i < nx; i++) row_in[i] = dist2[base + i];
+            dt_1d(row_in, row_out, nx, v, z);
+            for (int i = 0; i < nx; i++) dist2[base + i] = row_out[i];
+        }
+    }
+    /* Pass along y */
+    for (int k = 0; k < nz; k++) {
+        for (int i = 0; i < nx; i++) {
+            size_t base = (size_t)i + (size_t)k * dim3;
+            for (int j = 0; j < ny; j++) row_in[j] = dist2[base + (size_t)j * dim2];
+            dt_1d(row_in, row_out, ny, v, z);
+            for (int j = 0; j < ny; j++) dist2[base + (size_t)j * dim2] = row_out[j];
+        }
+    }
+    /* Pass along z */
+    for (int j = 0; j < ny; j++) {
+        for (int i = 0; i < nx; i++) {
+            size_t base = (size_t)i + (size_t)j * dim2;
+            for (int k = 0; k < nz; k++) row_in[k] = dist2[base + (size_t)k * dim3];
+            dt_1d(row_in, row_out, nz, v, z);
+            for (int k = 0; k < nz; k++) dist2[base + (size_t)k * dim3] = row_out[k];
+        }
+    }
+
+    free(row_in); free(row_out); free(v); free(z);
+}
+
+/* Marks mask[idx] = 1 for every voxel within `radius` (Å) of any atom center.
+ * Uses the same walk-splat pattern as pDenRenderPeng, but as a hard sphere
+ * test rather than evaluating the Peng kernel.
+ */
+void build_atom_mask(float *mask, int nx, int ny, int nz, double origin[3], double apix,
+                      double radius, size_t n, double *coords) {
+    double r2 = radius * radius;
+    size_t walk = ((size_t)(radius / apix)) + 1;
+    size_t dim2 = (size_t)nx;
+    size_t dim3 = (size_t)nx * ny;
+
+    for (size_t atom = 0; atom < n; atom++) {
+        double posx = coords[3 * atom]     - origin[0];
+        double posy = coords[3 * atom + 1] - origin[1];
+        double posz = coords[3 * atom + 2] - origin[2];
+
+        size_t gx = (size_t)(posx / apix);
+        size_t gy = (size_t)(posy / apix);
+        size_t gz = (size_t)(posz / apix);
+        size_t ex = gx + walk, ey = gy + walk, ez = gz + walk;
+        gx = (gx > walk ? gx - walk + 1 : 0);
+        gy = (gy > walk ? gy - walk + 1 : 0);
+        gz = (gz > walk ? gz - walk + 1 : 0);
+
+        for (size_t k = gz; k < ez; k++) {
+            if (k < (size_t)nz) {
+                size_t idxx = k * dim3;
+                for (size_t j = gy; j < ey; j++) {
+                    if (j < (size_t)ny) {
+                        for (size_t i = gx; i < ex; i++) {
+                            if (i < (size_t)nx) {
+                                size_t idx = i + j * dim2 + idxx;
+                                double rx = apix * i - posx;
+                                double ry = apix * j - posy;
+                                double rz = apix * k - posz;
+                                double d2 = rx * rx + ry * ry + rz * rz;
+                                if (d2 <= r2)
+                                    mask[idx] = 1.0f;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* Gaussian low-pass smoothing via FFT (no ringing, unlike a hard cutoff).
+ * sigma is the real-space Gaussian standard deviation in Å.
+ */
+void gaussian_smooth_fft(float *data, int nx, int ny, int nz, double angpix, double sigma) {
+    if (sigma <= 0.0) return;
+    int nz_complex = nz / 2 + 1;
+    int nvox = nx * ny * nz;
+    fftwf_complex *fft_data = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * nx * ny * nz_complex);
+    fftwf_plan plan_forward = fftwf_plan_dft_r2c_3d(nx, ny, nz, data, fft_data, FFTW_ESTIMATE);
+    fftwf_execute(plan_forward);
+
+    for (int i = 0; i < nx; i++) {
+        double fx = (i <= nx/2) ? ((double)i/(nx*angpix)) : ((double)(i - nx)/(nx*angpix));
+        for (int j = 0; j < ny; j++) {
+            double fy = (j <= ny/2) ? ((double)j/(ny*angpix)) : ((double)(j - ny)/(ny*angpix));
+            for (int k = 0; k < nz_complex; k++) {
+                double fz = (double)k/(nz*angpix);
+                double f2 = fx*fx + fy*fy + fz*fz;
+                double weight = exp(-2.0 * M_PI * M_PI * sigma * sigma * f2);
+                int idx = i*(ny*nz_complex) + j*nz_complex + k;
+                fft_data[idx][0] *= (float)weight;
+                fft_data[idx][1] *= (float)weight;
+            }
+        }
+    }
+
+    fftwf_plan plan_backward = fftwf_plan_dft_c2r_3d(nx, ny, nz, fft_data, data, FFTW_ESTIMATE);
+    fftwf_execute(plan_backward);
+    for (int i = 0; i < nvox; i++)
+        data[i] /= nvox;
+
+    fftwf_destroy_plan(plan_forward);
+    fftwf_destroy_plan(plan_backward);
+    fftwf_free(fft_data);
+}
+
+void threshold_binary(float *data, size_t nvox, float level) {
+    for (size_t i = 0; i < nvox; i++)
+        data[i] = (data[i] >= level) ? 1.0f : 0.0f;
+}
+
+/* Builds the final soft mask from a squared-distance-to-core map: 1 inside
+ * `cushion`, a raised-cosine taper from 1 to 0 across `edge_width` beyond
+ * that, 0 further out. Same taper shape used for the resolution filter,
+ * applied here in real (distance) space instead of Fourier space.
+ */
+void mask_from_distance(float *mask_out, const double *dist2, size_t nvox, double angpix,
+                         double cushion, double edge_width) {
+    double c1 = cushion;
+    double c2 = cushion + edge_width;
+    for (size_t idx = 0; idx < nvox; idx++) {
+        double dist = sqrt(dist2[idx]) * angpix;
+        double w;
+        if (c2 <= c1) {
+            w = (dist <= c1) ? 1.0 : 0.0;
+        } else if (dist <= c1) {
+            w = 1.0;
+        } else if (dist >= c2) {
+            w = 0.0;
+        } else {
+            w = 0.5 * (1.0 + cos(M_PI * (dist - c1) / (c2 - c1)));
+        }
+        mask_out[idx] = (float)w;
+    }
 }
 
 /* -------------------- Peng Kernel and Rendering -------------------- */
@@ -510,35 +734,11 @@ size_t parse_pdb(const char *pdb_file, double **p_coords, int **p_type, double *
     return n;
 }
 
-/* -------------------- Logging Function -------------------- */
-
-void log_execution(int argc, char *argv[]) {
-    FILE *log_fp = fopen(".dxpdb2mrc.log", "a");
-    if (!log_fp) {
-        fprintf(stderr, "Warning: Cannot open log file .dxpdb2mrc.log\n");
-        return;
-    }
-    
-    time_t now = time(NULL);
-    char *time_str = ctime(&now);
-    time_str[strlen(time_str) - 1] = '\0';
-    
-    fprintf(log_fp, "[%s] dxpdb2mrc executed with arguments: ", time_str);
-    for (int i = 0; i < argc; i++) {
-        fprintf(log_fp, "%s", argv[i]);
-        if (i < argc - 1) fprintf(log_fp, " ");
-    }
-    fprintf(log_fp, "\n");
-    fclose(log_fp);
-}
-
 /* -------------------- Main Function -------------------- */
 
 int main(int argc, char *argv[]) {
-    log_execution(argc, argv);
-    
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s input.pdb output.mrc [template.mrc] [-angpix value] [-box nx ny nz] [-center cx cy cz] [-res resolution]\n", argv[0]);
+        fprintf(stderr, "Usage: %s input.pdb output.mrc [template.mrc] [-angpix value] [-box nx ny nz] [-center cx cy cz] [-res resolution] [-res_edge width] [-mask_out file.mrc] [-mask_radius value] [-mask_cushion value] [-mask_edge value] [-mask_smooth sigma]\n", argv[0]);
         return 1;
     }
     
@@ -551,7 +751,14 @@ int main(int argc, char *argv[]) {
     int box[3] = {128, 128, 128};  // grid dimensions (voxels)
     double center[3] = { (box[0]*angpix)/2.0, (box[1]*angpix)/2.0, (box[2]*angpix)/2.0 };
     double resolution = 0.0;  // resolution cutoff; 0 means no filtering
-    
+    double res_edge = -1.0;   // taper width (1/Å) for resolution filter; <0 means use default
+
+    char *mask_out = NULL;         // mask output filename; NULL means don't compute a mask
+    double mask_radius = 1.5;      // core radius around each atom (Å)
+    double mask_cushion = 3.0;     // extra distance beyond the core kept at full weight (Å)
+    double mask_edge = 5.0;        // soft-edge taper width beyond the cushion (Å)
+    double mask_smooth = 0.0;      // pre-filter: Gaussian sigma (Å) to smooth the binary core mask before cushion/edge; 0 = off
+
     int arg_index = 3;
     /* Optional template MRC file */
     if (arg_index < argc && argv[arg_index][0] != '-') {
@@ -613,6 +820,54 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Error: -res requires a value.\n");
                 return 1;
             }
+        } else if (strcmp(argv[arg_index], "-res_edge") == 0) {
+            if (arg_index + 1 < argc) {
+                res_edge = atof(argv[arg_index + 1]);
+                arg_index += 2;
+            } else {
+                fprintf(stderr, "Error: -res_edge requires a value.\n");
+                return 1;
+            }
+        } else if (strcmp(argv[arg_index], "-mask_out") == 0) {
+            if (arg_index + 1 < argc) {
+                mask_out = argv[arg_index + 1];
+                arg_index += 2;
+            } else {
+                fprintf(stderr, "Error: -mask_out requires a value.\n");
+                return 1;
+            }
+        } else if (strcmp(argv[arg_index], "-mask_radius") == 0) {
+            if (arg_index + 1 < argc) {
+                mask_radius = atof(argv[arg_index + 1]);
+                arg_index += 2;
+            } else {
+                fprintf(stderr, "Error: -mask_radius requires a value.\n");
+                return 1;
+            }
+        } else if (strcmp(argv[arg_index], "-mask_cushion") == 0) {
+            if (arg_index + 1 < argc) {
+                mask_cushion = atof(argv[arg_index + 1]);
+                arg_index += 2;
+            } else {
+                fprintf(stderr, "Error: -mask_cushion requires a value.\n");
+                return 1;
+            }
+        } else if (strcmp(argv[arg_index], "-mask_edge") == 0) {
+            if (arg_index + 1 < argc) {
+                mask_edge = atof(argv[arg_index + 1]);
+                arg_index += 2;
+            } else {
+                fprintf(stderr, "Error: -mask_edge requires a value.\n");
+                return 1;
+            }
+        } else if (strcmp(argv[arg_index], "-mask_smooth") == 0) {
+            if (arg_index + 1 < argc) {
+                mask_smooth = atof(argv[arg_index + 1]);
+                arg_index += 2;
+            } else {
+                fprintf(stderr, "Error: -mask_smooth requires a value.\n");
+                return 1;
+            }
         } else {
             fprintf(stderr, "Unknown argument: %s\n", argv[arg_index]);
             return 1;
@@ -669,8 +924,13 @@ int main(int argc, char *argv[]) {
     
     /* Optionally, apply resolution filtering */
     if (resolution > 0) {
-        printf("Applying resolution filter...\n");
-        apply_resolution_filter(density_map.data, box[0], box[1], box[2], angpix, resolution);
+        /* Default taper width: 20% of the cutoff frequency, giving a smooth
+           raised-cosine roll-off instead of a hard cutoff (which causes
+           Gibbs-phenomenon ringing in the real-space map). */
+        if (res_edge < 0.0)
+            res_edge = 0.2 / resolution;
+        printf("Applying resolution filter (cutoff = %f Angstrom, taper width = %f 1/Angstrom)...\n", resolution, res_edge);
+        apply_resolution_filter(density_map.data, box[0], box[1], box[2], angpix, resolution, res_edge);
     }
     
     /* Prepare MRC header */
@@ -719,12 +979,59 @@ int main(int argc, char *argv[]) {
         free(coords); free(atom_types); free(factors);
         return 1;
     }
-    
+    printf("Density map written to %s\n", output_mrc);
+
+    /* Optionally build and write a soft mask around the atomic model, on the
+       same grid as the density map. */
+    if (mask_out) {
+        printf("Building mask: core radius = %f, cushion = %f, edge = %f, prefilter smooth sigma = %f (Angstrom)\n",
+               mask_radius, mask_cushion, mask_edge, mask_smooth);
+        float *mask_data = (float*)calloc(nvox, sizeof(float));
+        double *dist2 = (double*)malloc(nvox * sizeof(double));
+        if (!mask_data || !dist2) {
+            fprintf(stderr, "Error: Cannot allocate memory for mask.\n");
+            free(mask_data); free(dist2);
+            free(density_map.data);
+            free(coords); free(atom_types); free(factors);
+            return 1;
+        }
+
+        build_atom_mask(mask_data, box[0], box[1], box[2], origin, angpix, mask_radius, natoms, coords);
+        if (mask_smooth > 0.0) {
+            gaussian_smooth_fft(mask_data, box[0], box[1], box[2], angpix, mask_smooth);
+            threshold_binary(mask_data, nvox, 0.5f);
+        }
+        distance_transform_3d(mask_data, dist2, box[0], box[1], box[2]);
+        mask_from_distance(mask_data, dist2, nvox, angpix, mask_cushion, mask_edge);
+        free(dist2);
+
+        MRCHeader mask_header = header;
+        float mmin = mask_data[0], mmax = mask_data[0];
+        double msum = 0.0;
+        for (size_t i = 0; i < nvox; i++) {
+            if (mask_data[i] < mmin) mmin = mask_data[i];
+            if (mask_data[i] > mmax) mmax = mask_data[i];
+            msum += mask_data[i];
+        }
+        mask_header.amin = mmin;
+        mask_header.amax = mmax;
+        mask_header.amean = (float)(msum / nvox);
+
+        if (write_mrc(mask_out, &mask_header, mask_data) != 0) {
+            fprintf(stderr, "Error writing mask MRC file.\n");
+            free(mask_data);
+            free(density_map.data);
+            free(coords); free(atom_types); free(factors);
+            return 1;
+        }
+        free(mask_data);
+        printf("Mask written to %s\n", mask_out);
+    }
+
     free(density_map.data);
     free(coords);
     free(atom_types);
     free(factors);
-    printf("Density map written to %s\n", output_mrc);
     return 0;
 }
 
