@@ -1,5 +1,5 @@
 # Compiler and flags
-CC      = gcc-12
+CC      = gcc
 CFLAGS  = -O2 -Wall -std=c99 -I/opt/homebrew/include
 LDFLAGS = -L/opt/homebrew/lib -lm -lfftw3
 
